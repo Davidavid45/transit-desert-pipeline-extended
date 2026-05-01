@@ -1,22 +1,22 @@
 # Transit Desert Analysis Configuration
-# City: Dallas, TX (Dallas County)
+# City: Baltimore, MD (Baltimore City)
 # Modify these parameters to analyze a different city
 
 # -----------------------------------------------------------------------------
 # 1. Study Area
 # -----------------------------------------------------------------------------
 study_area:
-  name: "Dallas County"
-  state_fips: "48"        # Texas
-  county_fips: "113"      # Dallas County
-  full_fips: "48113"
-  crs_projected: "EPSG:2276"   # Texas State Plane North Central (feet)
+  name: "Baltimore City"
+  state_fips: "24"        # Maryland
+  county_fips: "510"      # Baltimore City (independent city)
+  full_fips: "24510"
+  crs_projected: "EPSG:2248"   # Maryland State Plane (feet)
   crs_geographic: "EPSG:4326"
 
 # City information for visualization
 city:
-  name: "Dallas"
-  state: "Texas"
+  name: "Baltimore"
+  state: "Maryland"
 
 # Neighborhood labeling settings for maps
 neighborhoods:
@@ -31,20 +31,22 @@ neighborhoods:
 # 2. GTFS Feeds
 # -----------------------------------------------------------------------------
 gtfs:
-  # DART (Dallas Area Rapid Transit)
+  # Maryland Transit Administration (MTA Maryland) — Baltimore region
   url:
-    - "https://www.dart.org/transitdata/latest/google_transit.zip"
-  transitland_feed_id: "f-9vg-dallasarearapidtransit"
+    - "https://feeds.mta.maryland.gov/gtfs/local-bus"
+    - "https://feeds.mta.maryland.gov/gtfs/light-rail"
+    - "https://feeds.mta.maryland.gov/gtfs/metro"
+  transitland_feed_id: "f-dqc-marylandtransitadministration"
   # Service date for analysis (typical weekday — UPDATE after downloading feed)
   # Check the feed's calendar.txt for valid dates
   analysis_date: "20260310"
-  merge_feeds: false
+  merge_feeds: true
   preferred_feed: "bus"
 
 
 spatial:
   unit: "tract"
-  crs_projected: "EPSG:2276"     # Texas State Plane North Central
+  crs_projected: "EPSG:2248"     # Maryland State Plane
   crs_geographic: "EPSG:4326"
   buffer_bus: 400
   buffer_rail: 800
@@ -209,7 +211,7 @@ built_environment:
     network_type: "walk"
  
   land_use_mix:
-    source: "osm"              # "sld" (EPA Smart Location Database) or "osm" (Shannon entropy)
+    source: "sld"              # "sld" (EPA Smart Location Database) or "osm" (Shannon entropy)
     min_features: 15           # OSM fallback: minimum tagged features for reliable entropy
     test_thresholds: [10, 15, 20]
     osm_tags:

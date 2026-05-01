@@ -2,8 +2,16 @@
 02b_compute_jobs_accessibility.py
 Compute job accessibility metric using r5py travel time matrix.
 
-This script calculates the number of jobs reachable within a specified
-travel time threshold (default: 45 minutes) by transit from each Census tract.
+This script calculates gravity-model job accessibility for each Census tract:
+
+    A_i = Σ O_j × exp(-β × t_ij)
+
+Where O_j = jobs at destination j, t_ij = travel time from tract i to j,
+and β = decay parameter calibrated from commute time distributions.
+
+Unlike a hard cutoff (e.g. "jobs within 45 min"), the decay model gives
+full weight to nearby jobs and diminishing weight to distant ones, with
+no abrupt boundary.
 
 Prerequisites:
 - r5py installed: pip install r5py
@@ -16,7 +24,7 @@ Usage:
 
 Outputs:
     - data/processed/jobs_accessibility.csv
-    - Updates supply_metrics.csv with jobs_accessible column
+    - Updates supply_metrics.csv with jobs_accessibility column
 """
 
 import sys
@@ -32,10 +40,13 @@ from datetime import datetime, date, time, timedelta
 import requests
 import zipfile
 from io import BytesIO
+from state_osm import get_osm_pbf_path
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from gtfs_utils import is_valid_gtfs_zip
 
 # Check for r5py
 try:
@@ -73,41 +84,9 @@ def download_osm_pbf(config, output_dir):
     osm_dir = output_dir / "osm"
     osm_dir.mkdir(parents=True, exist_ok=True)
     
-    pbf_path = osm_dir / "maryland-latest.osm.pbf"
+    pbf_path = get_osm_pbf_path(config, osm_dir)
     
-    if pbf_path.exists():
-        print(f"  ✓ OSM PBF already exists: {pbf_path}")
-        return pbf_path
-    
-    # Download from Geofabrik
-    url = "https://download.geofabrik.de/north-america/us/maryland-latest.osm.pbf"
-    print(f"  Downloading OSM data from: {url}")
-    print("  (This may take a few minutes...)")
-    
-    try:
-        response = requests.get(url, stream=True, timeout=300)
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
-        
-        with open(pbf_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total_size > 0:
-                    pct = (downloaded / total_size) * 100
-                    print(f"\r  Progress: {pct:.1f}%", end='', flush=True)
-        
-        print(f"\n  ✓ Downloaded OSM PBF to {pbf_path}")
-        return pbf_path
-        
-    except Exception as e:
-        print(f"  ✗ Error downloading OSM: {e}")
-        print("  → Please download manually from:")
-        print(f"    {url}")
-        print(f"    Save to: {pbf_path}")
-        return None
+    return pbf_path
 
 
 def download_lodes_data(config, output_dir):
@@ -130,10 +109,33 @@ def download_lodes_data(config, output_dir):
     lodes_dir.mkdir(parents=True, exist_ok=True)
     
     state_fips = config['study_area']['state_fips']
-    lodes_year = config['accessibility']['lodes_year']
     
-    # State abbreviation from FIPS
-    state_abbrev = 'md'  # Maryland
+    # LODES year — check multiple config locations
+    lodes_year = (config.get('accessibility', {}).get('job_accessibility', {}).get('lodes_year')
+                  or config.get('accessibility', {}).get('lodes_year')
+                  or 2021)  # Default to 2021 (most recent stable LODES release)
+    
+    # State FIPS to abbreviation mapping (common states)
+    fips_to_abbrev = {
+        '24': 'md', '42': 'pa', '47': 'tn', '48': 'tx',
+        '06': 'ca', '36': 'ny', '17': 'il', '12': 'fl',
+        '39': 'oh', '51': 'va', '11': 'dc', '34': 'nj',
+        '13': 'ga', '37': 'nc', '25': 'ma', '53': 'wa',
+    }
+    state_abbrev = fips_to_abbrev.get(state_fips)
+    if state_abbrev is None:
+        # Fallback: try to derive from us library or just warn
+        try:
+            from us import states as us_states
+            state_obj = us_states.lookup(state_fips)
+            state_abbrev = state_obj.abbr.lower() if state_obj else None
+        except ImportError:
+            pass
+    
+    if state_abbrev is None:
+        print(f"  ✗ Cannot determine state abbreviation for FIPS {state_fips}")
+        print("  → Add it to the fips_to_abbrev mapping in 02b")
+        return None
     
     # WAC file URL
     # Format: state_wac_S000_JT00_YYYY.csv.gz
@@ -227,10 +229,11 @@ def load_tract_centroids(config):
     # Add lat/lon columns
     centroids['lat'] = centroids.geometry.y
     centroids['lon'] = centroids.geometry.x
+    centroids['id'] = centroids['GEOID']  # For r5py matching
     
     print(f"  ✓ Loaded {len(centroids)} tract centroids")
     
-    return centroids[['GEOID', 'geometry', 'lat', 'lon']]
+    return centroids[['GEOID', 'id', 'geometry', 'lat', 'lon']]
 
 
 def compute_travel_time_matrix(origins, destinations, gtfs_path, osm_path, config):
@@ -261,21 +264,43 @@ def compute_travel_time_matrix(origins, destinations, gtfs_path, osm_path, confi
     print("  Building transport network (this may take several minutes)...")
     
     # Create transport network
+    # Handle both single zip and directory of zips
+    # Filter out wrapper zips (e.g. zips containing only other zips, no GTFS txt files)
+    if gtfs_path.is_dir():
+        gtfs_files = [str(f) for f in sorted(gtfs_path.glob("*.zip"))
+                      if is_valid_gtfs_zip(f)]
+    else:
+        gtfs_files = [str(gtfs_path)]
+    
     transport_network = r5py.TransportNetwork(
         osm_pbf=str(osm_path),
-        gtfs=[str(gtfs_path)]
+        gtfs=gtfs_files
     )
     
-    # Set departure time (AM peak)
-    departure_time = datetime(2024, 10, 15, 8, 0)  # Tuesday 8:00 AM
+    # Departure time from config
+    job_config = config.get('accessibility', {}).get('job_accessibility', {})
+    dep_time_str = job_config.get('departure_time', '08:00:00')
+    dep_h, dep_m, dep_s = map(int, dep_time_str.split(':'))
     
-    # Travel time threshold from config
-    max_time = timedelta(minutes=config['accessibility']['travel_time_threshold'])
+    # Use the analysis date from config, or a sensible default
+    analysis_date_str = config.get('gtfs', {}).get('analysis_date', '20241015')
+    try:
+        dep_date = datetime.strptime(analysis_date_str, '%Y%m%d').date()
+    except ValueError:
+        dep_date = date(2024, 10, 15)
     
-    print(f"  Computing travel times (max {config['accessibility']['travel_time_threshold']} min)...")
+    departure_time = datetime.combine(dep_date, time(dep_h, dep_m, dep_s))
+    
+    # Max travel time from config (upper bound for routing efficiency)
+    max_minutes = job_config.get('max_travel_time_minutes', 90)
+    max_time = timedelta(minutes=max_minutes)
+    
+    print(f"  Departure: {departure_time}")
+    print(f"  Max travel time: {max_minutes} min (routing upper bound)")
+    print(f"  Computing travel times...")
     
     # Compute travel time matrix
-    travel_time_matrix = r5py.TravelTimeMatrixComputer(
+    travel_time_matrix = r5py.TravelTimeMatrix(
         transport_network,
         origins=origins,
         destinations=destinations,
@@ -283,7 +308,9 @@ def compute_travel_time_matrix(origins, destinations, gtfs_path, osm_path, confi
         departure_time_window=timedelta(hours=1),
         transport_modes=[r5py.TransportMode.TRANSIT, r5py.TransportMode.WALK],
         max_time=max_time
-    ).compute_travel_times()
+    )
+
+    travel_time_matrix = pd.DataFrame(travel_time_matrix)
     
     print(f"  ✓ Computed {len(travel_time_matrix)} origin-destination pairs")
     
@@ -292,58 +319,92 @@ def compute_travel_time_matrix(origins, destinations, gtfs_path, osm_path, confi
 
 def calculate_jobs_accessible(travel_times, tract_jobs, config):
     """
-    Calculate jobs accessible from each tract within time threshold.
+    Calculate gravity-model job accessibility from each tract.
+    
+    A_i = Σ O_j × exp(-β × t_ij)
+    
+    Where:
+      O_j = total jobs at destination tract j
+      t_ij = travel time in minutes from tract i to tract j
+      β = decay parameter (higher = steeper decay = only nearby jobs matter)
+    
+    A job 10 minutes away counts almost fully.
+    A job 40 minutes away counts partially.
+    A job 60+ minutes away barely counts.
+    No hard cutoff — the decay handles it smoothly.
     
     Parameters
     ----------
     travel_times : DataFrame
-        Travel time matrix with from_id, to_id, travel_time
+        Travel time matrix with from_id, to_id, travel_time (minutes)
     tract_jobs : DataFrame
-        Jobs per tract
+        Jobs per tract (GEOID, total_jobs)
     config : dict
-        Configuration dictionary
+        Configuration dictionary with decay_beta
     
     Returns
     -------
     DataFrame
-        Jobs accessible from each tract
+        Gravity-weighted job accessibility from each tract
     """
-    threshold = config['accessibility']['travel_time_threshold']
+    job_config = config.get('accessibility', {}).get('job_accessibility', {})
+    decay_beta = job_config.get('decay_beta', 0.08)
     
-    # Filter to trips within threshold
-    reachable = travel_times[travel_times['travel_time'] <= threshold].copy()
+    print(f"  Decay model: A_i = Σ O_j × exp(-{decay_beta} × t_ij)")
     
-    # Merge with jobs
-    reachable = reachable.merge(
+    # Drop rows with NaN travel time (unreachable OD pairs)
+    valid_times = travel_times.dropna(subset=['travel_time']).copy()
+    
+    # Merge with jobs at destination
+    valid_times = valid_times.merge(
         tract_jobs,
         left_on='to_id',
         right_on='GEOID',
         how='left'
-    ).fillna(0)
+    )
+    valid_times['total_jobs'] = valid_times['total_jobs'].fillna(0)
     
-    # Sum jobs reachable from each origin
-    jobs_accessible = reachable.groupby('from_id').agg({
-        'total_jobs': 'sum'
+    # Apply exponential decay weighting
+    valid_times['decay_weight'] = np.exp(-decay_beta * valid_times['travel_time'])
+    valid_times['weighted_jobs'] = valid_times['total_jobs'] * valid_times['decay_weight']
+    
+    # Sum weighted jobs reachable from each origin
+    jobs_accessible = valid_times.groupby('from_id').agg({
+        'weighted_jobs': 'sum',
+        'total_jobs': 'sum',       # Also keep raw count for reference
+        'to_id': 'count'           # Number of reachable destinations
     }).reset_index()
     
-    jobs_accessible.columns = ['GEOID', 'jobs_accessible']
+    jobs_accessible.columns = ['GEOID', 'jobs_accessibility', 'jobs_raw_sum', 'destinations_reached']
     
-    print(f"\n  Jobs Accessibility Statistics:")
-    print(f"    Mean jobs accessible: {jobs_accessible['jobs_accessible'].mean():,.0f}")
-    print(f"    Median: {jobs_accessible['jobs_accessible'].median():,.0f}")
-    print(f"    Max: {jobs_accessible['jobs_accessible'].max():,.0f}")
+    # Show how decay compares to raw count
+    print(f"\n  Jobs accessibility statistics (gravity-weighted):")
+    print(f"    Mean:   {jobs_accessible['jobs_accessibility'].mean():,.0f}")
+    print(f"    Median: {jobs_accessible['jobs_accessibility'].median():,.0f}")
+    print(f"    Max:    {jobs_accessible['jobs_accessibility'].max():,.0f}")
+    print(f"\n  For comparison — raw jobs sum (no decay):")
+    print(f"    Mean:   {jobs_accessible['jobs_raw_sum'].mean():,.0f}")
+    print(f"    Ratio (decay/raw): {jobs_accessible['jobs_accessibility'].mean() / max(jobs_accessible['jobs_raw_sum'].mean(), 1):.2%}")
     
-    return jobs_accessible
+    # Show effective decay at key travel times
+    print(f"\n  Decay weights at key travel times (β={decay_beta}):")
+    for t in [5, 10, 15, 20, 30, 45, 60, 90]:
+        w = np.exp(-decay_beta * t)
+        print(f"    {t:3d} min: {w:.3f} ({w:.0%} of full weight)")
+    
+    return jobs_accessible[['GEOID', 'jobs_accessibility']]
 
 
 def update_supply_metrics(jobs_accessible):
     """
-    Update supply_metrics.csv with jobs accessibility.
+    Update supply_metrics.csv with jobs accessibility column.
+    
+    CPTA recalculation is handled separately by 02d_compute_cpta.py.
     
     Parameters
     ----------
     jobs_accessible : DataFrame
-        Jobs accessible from each tract
+        Gravity-weighted job accessibility from each tract
     """
     supply_path = PROJECT_ROOT / "data" / "processed" / "supply_metrics.csv"
     
@@ -353,18 +414,21 @@ def update_supply_metrics(jobs_accessible):
     
     supply_df = pd.read_csv(supply_path, dtype={'GEOID': str})
     
+    # Drop existing column if present (re-run scenario)
+    if 'jobs_accessibility' in supply_df.columns:
+        supply_df = supply_df.drop(columns=['jobs_accessibility'])
+    
     # Merge jobs accessibility
     supply_df = supply_df.merge(
         jobs_accessible,
         on='GEOID',
         how='left'
-    ).fillna(0)
-    
-    # Recalculate CPTA with jobs accessibility
-    # ... (This would require updating the z-score calculation)
+    )
+    supply_df['jobs_accessibility'] = supply_df['jobs_accessibility'].fillna(0)
     
     supply_df.to_csv(supply_path, index=False)
-    print(f"  ✓ Updated supply_metrics.csv with jobs_accessible column")
+    print(f"  ✓ Updated supply_metrics.csv with jobs_accessibility column")
+    print(f"  → Run 02d_compute_cpta.py to incorporate into CPTA score")
 
 
 def main():
@@ -423,17 +487,20 @@ def main():
     
     # Add jobs to centroids for destination weighting
     centroids_with_jobs = centroids.merge(tract_jobs, on='GEOID', how='left').fillna(0)
+    centroids_with_jobs['id'] = centroids_with_jobs['GEOID']  # Ensure 'id' column exists for r5py matching
     
     # Step 4: Compute travel time matrix
     print("\n" + "-" * 40)
     print("Step 4: Compute Travel Time Matrix")
     print("-" * 40)
     
-    gtfs_path = raw_dir / "gtfs" / "gtfs.zip"
-    if not gtfs_path.exists():
-        print(f"  ✗ GTFS not found: {gtfs_path}")
+    gtfs_path = raw_dir / "gtfs"
+    gtfs_zips = list(gtfs_path.glob("*.zip")) if gtfs_path.is_dir() else []
+    if not gtfs_zips:
+        print(f"  No GTFS zip files found in: {gtfs_path}")
         print("    Run 01_download_data.py first")
         sys.exit(1)
+    print(f"  Found {len(gtfs_zips)} GTFS file(s): {[f.name for f in gtfs_zips]}")
     
     try:
         travel_times = compute_travel_time_matrix(
@@ -471,8 +538,9 @@ def main():
     
     print("\n" + "=" * 60)
     print("Job accessibility calculation complete!")
-    print("\nNote: Re-run 02_compute_supply.py to recalculate CPTA with jobs metric")
-    print("      Then re-run 04_identify_deserts.py to update classifications")
+    print("\nNext steps:")
+    print("  python src/02c_compute_poi_accessibility.py  (optional)")
+    print("  python src/02d_compute_cpta.py               (computes CPTA score)")
     print("=" * 60)
 
 

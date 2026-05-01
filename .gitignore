@@ -34,6 +34,11 @@ logs/**
 !outputs/tables/.gitkeep
 !logs/.gitkeep
 
+# Cache directories (large, auto-generated)
+cache/
+.cache/
+src/cache/
+
 # R5 files (large travel time routing library)
 *.jar
 

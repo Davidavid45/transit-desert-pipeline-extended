@@ -1,22 +1,22 @@
 # Transit Desert Analysis Configuration
-# City: Dallas, TX (Dallas County)
+# City: Philadelphia, PA (Philadelphia County)
 # Modify these parameters to analyze a different city
 
 # -----------------------------------------------------------------------------
 # 1. Study Area
 # -----------------------------------------------------------------------------
 study_area:
-  name: "Dallas County"
-  state_fips: "48"        # Texas
-  county_fips: "113"      # Dallas County
-  full_fips: "48113"
-  crs_projected: "EPSG:2276"   # Texas State Plane North Central (feet)
+  name: "Philadelphia County"
+  state_fips: "42"        # Pennsylvania
+  county_fips: "101"      # Philadelphia County
+  full_fips: "42101"
+  crs_projected: "EPSG:2272"   # Pennsylvania State Plane South (feet)
   crs_geographic: "EPSG:4326"
 
 # City information for visualization
 city:
-  name: "Dallas"
-  state: "Texas"
+  name: "Philadelphia"
+  state: "Pennsylvania"
 
 # Neighborhood labeling settings for maps
 neighborhoods:
@@ -31,10 +31,10 @@ neighborhoods:
 # 2. GTFS Feeds
 # -----------------------------------------------------------------------------
 gtfs:
-  # DART (Dallas Area Rapid Transit)
+  # SEPTA (Southeastern Pennsylvania Transportation Authority)
   url:
-    - "https://www.dart.org/transitdata/latest/google_transit.zip"
-  transitland_feed_id: "f-9vg-dallasarearapidtransit"
+    - "https://www3.septa.org/developer/gtfs_public.zip"
+  transitland_feed_id: "f-dr4-septa"
   # Service date for analysis (typical weekday — UPDATE after downloading feed)
   # Check the feed's calendar.txt for valid dates
   analysis_date: "20260310"
@@ -44,7 +44,7 @@ gtfs:
 
 spatial:
   unit: "tract"
-  crs_projected: "EPSG:2276"     # Texas State Plane North Central
+  crs_projected: "EPSG:2272"     # Pennsylvania State Plane South
   crs_geographic: "EPSG:4326"
   buffer_bus: 400
   buffer_rail: 800
@@ -209,7 +209,7 @@ built_environment:
     network_type: "walk"
  
   land_use_mix:
-    source: "osm"              # "sld" (EPA Smart Location Database) or "osm" (Shannon entropy)
+    source: "sld"              # "sld" (EPA Smart Location Database) or "osm" (Shannon entropy)
     min_features: 15           # OSM fallback: minimum tagged features for reliable entropy
     test_thresholds: [10, 15, 20]
     osm_tags:

@@ -2,23 +2,31 @@
 """
 run_pipeline.py
 ================
-Transit Desert Identification Pipeline runner with:
+Transit Desert Identification Pipeline (Extended Version)
 
-1) Clean-slate runs (empties previous raw/processed/outputs but keeps folders)
-2) Step 2 Compute Supply (CPTA) before Step 3
-3) Run logging (captures everything printed during the run into logs/*.log)
+Pipeline Steps:
+  1   Download Data (GTFS, Census, ACS, OSM)
+  2   Compute Supply Metrics (CPTA) — 11 built-in metrics
+  2b  Compute Job Accessibility (optional, requires r5py + Java)
+  2c  Compute POI Accessibility (optional, requires r5py + Java)
+  2d  Compute CPTA Score (composite accessibility index)
+  3   Compute Demand Metrics (TVI) — 5 components
+  4   Identify Transit Deserts (LISA clustering + sensitivity analysis)
+  5   Generate Visualizations (maps, figures, tables)
 
 Usage examples:
-  python run_pipeline.py
-  python run_pipeline.py --steps 1,2,3,4,5
-  python run_pipeline.py --no-clean
-  python run_pipeline.py --quiet
-  python run_pipeline.py --include-jobs
+  python run_pipeline.py                                  # Run all steps (1→2→2b→2c→2d→3→4→5)
+  python run_pipeline.py --config config/MyCity.yaml      # Use a specific config file
+  python run_pipeline.py --steps 1,2,3,4,5                # Skip 2b/2c/2d (no accessibility)
+  python run_pipeline.py --steps 3,4,5 --no-clean         # Re-run from demand onward
+  python run_pipeline.py --no-clean --steps 4,5            # Re-run analysis + viz only
+  python run_pipeline.py --quiet                           # Suppress terminal output
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -45,6 +53,7 @@ class StepDef:
     name: str
     script: str
     description: str
+    optional: bool = False
 
 
 STEPS = {
@@ -52,66 +61,85 @@ STEPS = {
         id="1",
         name="Download Data",
         script="src/01_download_data.py",
-        description="Download GTFS, Census tracts, and ACS demographic data",
+        description="Download GTFS feeds, Census tracts, ACS demographics",
     ),
     "2": StepDef(
         id="2",
         name="Compute Supply (CPTA)",
         script="src/02_compute_supply.py",
-        description="Calculate transit supply metrics and CPTA score",
+        description="Calculate 11 transit + built environment metrics, CPTA score",
     ),
     "2b": StepDef(
         id="2b",
-        name="Compute Job Accessibility (optional)",
+        name="Job Accessibility",
         script="src/02b_compute_jobs_accessibility.py",
-        description="Calculate jobs accessible by transit (requires r5py + Java)",
+        description="Jobs reachable within 45 min by transit (requires r5py + Java)",
+        optional=True,
+    ),
+    "2c": StepDef(
+        id="2c",
+        name="POI Accessibility",
+        script="src/02c_compute_poi_accessibility.py",
+        description="Essential service POIs reachable within 30 min (requires r5py + Java)",
+        optional=True,
+    ),
+    "2d": StepDef(
+        id="2d",
+        name="Compute CPTA Score",
+        script="src/02d_compute_cpta.py",
+        description="Category-weighted composite transit accessibility index",
     ),
     "3": StepDef(
         id="3",
-        name="Compute Demand (TDI)",
+        name="Compute Demand (TVI)",
         script="src/03_compute_demand.py",
-        description="Calculate transit demand metrics and TDI score",
+        description="Calculate 5-component Transit Vulnerability Index",
     ),
     "4": StepDef(
         id="4",
         name="Identify Transit Deserts",
         script="src/04_identify_deserts.py",
-        description="Apply LISA clustering and classify transit deserts",
+        description="LISA clustering, sensitivity analysis, equity tests",
     ),
     "5": StepDef(
         id="5",
         name="Generate Visualizations",
         script="src/05_visualize.py",
-        description="Create maps, figures, and summary tables",
+        description="Maps, figures, correlation heatmap, Moran scatterplot",
     ),
 }
+
+# Canonical step order
+STEP_ORDER = ["1", "2", "2b", "2c", "2d", "3", "4", "5"]
 
 
 # ---------------------------
 # Printing helpers
 # ---------------------------
-def print_banner() -> None:
+def print_banner(steps_to_run: List[str]) -> None:
+    print()
     print("=" * 70)
-    print("  TRANSIT DESERT IDENTIFICATION PIPELINE")
-    print("  A Geospatial Framework for Equity-Focused Service Gap Analysis")
+    print("  TRANSIT DESERT IDENTIFICATION PIPELINE (Extended)")
+    print("  Equity-Focused Service Gap Analysis")
     print("=" * 70)
     print()
-    print("Pipeline Steps:")
-    print("-" * 50)
-    for k in ["1", "2", "2b", "3", "4", "5"]:
-        if k in STEPS:
-            s = STEPS[k]
-            print(f"  {s.id}. {s.name}")
-            print(f"     {s.description}")
-    print("-" * 50)
+    print("  Pipeline Steps:")
+    print("  " + "-" * 55)
+    for k in STEP_ORDER:
+        s = STEPS[k]
+        marker = "→" if k in steps_to_run else " "
+        opt = " (optional)" if s.optional else ""
+        skip = " [SKIP]" if k not in steps_to_run and s.optional else ""
+        print(f"  {marker} {s.id:>3}. {s.name}{opt}{skip}")
+        print(f"        {s.description}")
+    print("  " + "-" * 55)
     print()
 
 
 # ---------------------------
-# Cleaning (keep base folders)
+# Cleaning
 # ---------------------------
 def _empty_dir(dir_path: Path) -> None:
-    """Delete everything inside dir_path, but keep the directory."""
     dir_path.mkdir(parents=True, exist_ok=True)
     for item in dir_path.iterdir():
         if item.is_dir():
@@ -124,27 +152,22 @@ def _empty_dir(dir_path: Path) -> None:
 
 
 def clean_run_artifacts() -> None:
-    """
-    Clean previous run artifacts and cached inputs.
-    Keeps directories but removes contents.
-    """
     targets = [
-        # raw inputs
         PROJECT_ROOT / "data" / "raw" / "gtfs",
         PROJECT_ROOT / "data" / "raw" / "acs",
         PROJECT_ROOT / "data" / "raw" / "census",
-        # processed outputs
         PROJECT_ROOT / "data" / "processed",
-        # viz outputs
+        PROJECT_ROOT / "data" / "external",
         PROJECT_ROOT / "outputs" / "maps",
         PROJECT_ROOT / "outputs" / "figures",
         PROJECT_ROOT / "outputs" / "tables",
     ]
 
-    print("\n🧹 Cleaning previous run artifacts (keeping folders)...")
+    print("\n  Cleaning previous run artifacts...")
     for t in targets:
         _empty_dir(t)
-        print(f"  ✓ Emptied: {t}")
+        print(f"    Emptied: {t.relative_to(PROJECT_ROOT)}")
+    print()
 
 
 # ---------------------------
@@ -156,14 +179,15 @@ def get_run_log_path() -> Path:
     return LOGS_DIR / f"pipeline_run_{ts}.log"
 
 
-def log_header(log_path: Path, text: str) -> None:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(text + "\n")
+def log_write(log_path: Optional[Path], text: str) -> None:
+    if log_path:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(text + "\n")
 
 
 # ---------------------------
-# Step execution (tee output to terminal + file)
+# Step execution
 # ---------------------------
 def run_step(step_id: str, *, verbose: bool, log_path: Optional[Path]) -> bool:
     if step_id not in STEPS:
@@ -173,27 +197,24 @@ def run_step(step_id: str, *, verbose: bool, log_path: Optional[Path]) -> bool:
     script_path = PROJECT_ROOT / step.script
 
     if not script_path.exists():
-        msg = f"✗ Script not found: {script_path}"
+        msg = f"  Script not found: {script_path}"
         print(msg)
-        if log_path:
-            log_header(log_path, msg)
+        log_write(log_path, msg)
         return False
 
+    header = f"STEP {step.id}: {step.name}"
     print("\n" + "=" * 60)
-    print(f"STEP {step.id}: {step.name}")
+    print(f"  {header}")
     print("=" * 60)
 
     start_time = time.time()
 
-    def log_write(line: str) -> None:
-        if not log_path:
-            return
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(line)
+    log_write(log_path, f"\n{'=' * 60}")
+    log_write(log_path, f"  {header}")
+    log_write(log_path, f"  Started: {datetime.now().isoformat(timespec='seconds')}")
+    log_write(log_path, f"{'=' * 60}\n")
 
     cmd = [sys.executable, str(script_path)]
-    log_write(f"\n\n=== STEP {step.id}: {step.name} ===\n")
-    log_write(f"CMD: {' '.join(cmd)}\n\n")
 
     try:
         proc = subprocess.Popen(
@@ -209,46 +230,38 @@ def run_step(step_id: str, *, verbose: bool, log_path: Optional[Path]) -> bool:
         for line in proc.stdout:
             if verbose:
                 print(line, end="")
-            log_write(line)
+            log_write(log_path, line.rstrip())
 
         rc = proc.wait()
         elapsed = time.time() - start_time
 
         if rc == 0:
-            msg = f"\n✓ Step {step.id} completed in {elapsed:.1f} seconds\n"
+            msg = f"\n  Step {step.id} completed in {elapsed:.1f}s"
             print(msg)
-            log_write(msg)
+            log_write(log_path, msg)
             return True
         else:
-            msg = f"\n✗ Step {step.id} failed (exit code {rc})\n"
+            msg = f"\n  Step {step.id} FAILED (exit code {rc})"
             print(msg)
-            log_write(msg)
+            log_write(log_path, msg)
             return False
 
     except Exception as e:
-        msg = f"\n✗ Error running step {step.id}: {e}\n"
+        msg = f"\n  Error running step {step.id}: {e}"
         print(msg)
-        log_write(msg)
+        log_write(log_path, msg)
         return False
 
 
 # ---------------------------
 # Pipeline orchestration
 # ---------------------------
-def parse_steps_arg(steps_str: Optional[str], include_jobs: bool) -> List[str]:
-    """
-    Default pipeline steps:
-      1 -> 2 -> (2b optional) -> 3 -> 4 -> 5
-    """
+def parse_steps_arg(steps_str: Optional[str]) -> List[str]:
     if steps_str:
         steps = [s.strip().lower() for s in steps_str.split(",") if s.strip()]
     else:
-        steps = ["1", "2", "3", "4", "5"]
-        if include_jobs:
-            # insert 2b right after 2
-            steps = ["1", "2", "2b", "3", "4", "5"]
+        steps = ["1", "2", "2b", "2c", "2d", "3", "4", "5"]
 
-    # Basic validation
     for s in steps:
         if s not in STEPS:
             raise ValueError(f"Invalid step '{s}'. Valid: {', '.join(STEPS.keys())}")
@@ -261,58 +274,91 @@ def run_pipeline(
     verbose: bool,
     clean: bool,
     log_path: Optional[Path],
+    config_path: Optional[Path] = None,
 ) -> bool:
-    print_banner()
+    print_banner(steps)
 
-    if clean:
+    if config_path:
+        dest = PROJECT_ROOT / "config" / "config.yaml"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(config_path, dest)
+        print(f"  Using config: {config_path}")
+
+    if clean and "1" in steps:
         clean_run_artifacts()
 
     if log_path:
-        print(f"\n📝 Logging to: {log_path}")
-        log_header(log_path, "=" * 70)
-        log_header(log_path, "TRANSIT DESERT PIPELINE RUN LOG")
-        log_header(log_path, f"Started: {datetime.now().isoformat(timespec='seconds')}")
-        log_header(log_path, f"Steps: {', '.join(steps)}")
-        log_header(log_path, "=" * 70 + "\n")
+        print(f"  Log file: {log_path.relative_to(PROJECT_ROOT)}")
+        log_write(log_path, "=" * 70)
+        log_write(log_path, "TRANSIT DESERT PIPELINE RUN LOG (Extended)")
+        log_write(log_path, f"Started: {datetime.now().isoformat(timespec='seconds')}")
+        log_write(log_path, f"Steps: {', '.join(steps)}")
+        log_write(log_path, "=" * 70)
 
-    print("\nSteps to run:", ", ".join(steps))
-
-    print("\n" + "=" * 60)
-    print("PIPELINE START")
-    print("=" * 60)
+    print(f"\n  Running steps: {' → '.join(steps)}")
 
     pipeline_start = time.time()
     step_status = {}
+    failed = False
 
     for step_id in steps:
+        step = STEPS[step_id]
+
         ok = run_step(step_id, verbose=verbose, log_path=log_path)
         step_status[step_id] = ok
+
         if not ok:
-            print("\n⚠ Pipeline stopped at step", step_id)
-            break
+            if step.optional:
+                print(f"\n  Optional step {step_id} failed — continuing pipeline")
+                step_status[step_id] = "skipped"
+            else:
+                print(f"\n  Pipeline stopped at step {step_id}")
+                failed = True
+                break
 
     total_elapsed = time.time() - pipeline_start
 
+    # Summary
     print("\n" + "=" * 60)
-    print("PIPELINE SUMMARY")
+    print("  PIPELINE SUMMARY")
     print("=" * 60)
-    for s in steps:
-        status = "✓ Complete" if step_status.get(s) else ("✗ Failed" if s in step_status else "— Skipped")
-        print(f"  Step {s}: {status}")
-    print(f"\nTotal time: {total_elapsed:.1f} seconds ({total_elapsed/60:.1f} minutes)\n")
 
-    all_ok = all(step_status.get(s, False) for s in steps if s in step_status) and (
-        len(step_status) == len(steps)
-    )
+    for s in steps:
+        status = step_status.get(s)
+        if status is True:
+            icon = "✓"
+            label = "Complete"
+        elif status == "skipped":
+            icon = "⚠"
+            label = "Failed (optional, skipped)"
+        elif status is False:
+            icon = "✗"
+            label = "Failed"
+        else:
+            icon = "—"
+            label = "Not reached"
+        print(f"    {icon} Step {s}: {label}")
+
+    minutes = total_elapsed / 60
+    print(f"\n  Total time: {total_elapsed:.1f}s ({minutes:.1f} min)")
+
+    all_ok = not failed
 
     if log_path:
-        log_header(log_path, "\n" + "=" * 70)
-        log_header(log_path, f"Finished: {datetime.now().isoformat(timespec='seconds')}")
-        log_header(log_path, f"Total time: {total_elapsed:.1f}s")
-        log_header(log_path, f"Status: {'SUCCESS' if all_ok else 'FAILED'}")
-        log_header(log_path, "=" * 70 + "\n")
+        log_write(log_path, "\n" + "=" * 70)
+        log_write(log_path, f"Finished: {datetime.now().isoformat(timespec='seconds')}")
+        log_write(log_path, f"Total time: {total_elapsed:.1f}s")
+        log_write(log_path, f"Status: {'SUCCESS' if all_ok else 'FAILED'}")
+        log_write(log_path, "=" * 70)
 
-    print("✓ Pipeline completed successfully" if all_ok else "✗ Pipeline completed with errors")
+    if all_ok:
+        print("\n  Pipeline completed successfully!")
+        print(f"\n  Results: data/processed/")
+        print(f"  Outputs: outputs/maps/, outputs/figures/, outputs/tables/")
+    else:
+        print("\n  Pipeline completed with errors.")
+
+    print()
     return all_ok
 
 
@@ -320,45 +366,49 @@ def run_pipeline(
 # CLI
 # ---------------------------
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the Transit Desert pipeline")
+    parser = argparse.ArgumentParser(
+        description="Transit Desert Identification Pipeline (Extended)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python run_pipeline.py                                  Run all steps (1→2→2b→2c→2d→3→4→5)
+  python run_pipeline.py --config config/MyCity.yaml      Use a specific config file
+  python run_pipeline.py --steps 1,2,3,4,5                Skip accessibility steps
+  python run_pipeline.py --steps 3,4,5 --no-clean         Re-run from demand onward
+  python run_pipeline.py --no-clean --steps 4,5            Re-run analysis + viz only
+        """
+    )
 
     parser.add_argument(
-        "--steps",
-        type=str,
-        default=None,
-        help="Comma-separated steps to run. Example: 1,2,3,4,5 (default runs all)",
+        "--config", type=str, default=None,
+        help="Path to YAML config file (default: config/Config.yaml)",
     )
     parser.add_argument(
-        "--include-jobs",
-        action="store_true",
-        help="Include Step 2b (job accessibility). Default: off.",
+        "--steps", type=str, default=None,
+        help="Comma-separated steps: 1,2,2b,2c,2d,3,4,5 (default: all)",
     )
     parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Do not print step output to terminal (still logs to file).",
+        "--quiet", action="store_true",
+        help="Suppress terminal output (still logs to file)",
     )
     parser.add_argument(
-        "--no-clean",
-        action="store_true",
-        help="Do not delete data/outputs from previous run.",
+        "--no-clean", action="store_true",
+        help="Keep data/outputs from previous run",
     )
     parser.add_argument(
-        "--no-log",
-        action="store_true",
-        help="Do not write a run log file.",
+        "--no-log", action="store_true",
+        help="Do not write a run log file",
     )
 
     args = parser.parse_args()
 
-    steps = parse_steps_arg(args.steps, include_jobs=args.include_jobs)
+    steps = parse_steps_arg(args.steps)
     log_path = None if args.no_log else get_run_log_path()
-
-    # If quiet, we still want logging unless disabled
     verbose = not args.quiet
     clean = not args.no_clean
+    config_path = Path(args.config) if args.config else None
 
-    ok = run_pipeline(steps, verbose=verbose, clean=clean, log_path=log_path)
+    ok = run_pipeline(steps, verbose=verbose, clean=clean, log_path=log_path, config_path=config_path)
     sys.exit(0 if ok else 1)
 
 

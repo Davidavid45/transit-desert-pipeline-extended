@@ -1,22 +1,22 @@
 # Transit Desert Analysis Configuration
-# City: Dallas, TX (Dallas County)
+# City: Nashville, TN (Davidson County)
 # Modify these parameters to analyze a different city
 
 # -----------------------------------------------------------------------------
 # 1. Study Area
 # -----------------------------------------------------------------------------
 study_area:
-  name: "Dallas County"
-  state_fips: "48"        # Texas
-  county_fips: "113"      # Dallas County
-  full_fips: "48113"
-  crs_projected: "EPSG:2276"   # Texas State Plane North Central (feet)
+  name: "Davidson County"
+  state_fips: "47"        # Tennessee
+  county_fips: "037"      # Davidson County (Nashville-Davidson metro)
+  full_fips: "47037"
+  crs_projected: "EPSG:2274"   # Tennessee State Plane (feet)
   crs_geographic: "EPSG:4326"
 
 # City information for visualization
 city:
-  name: "Dallas"
-  state: "Texas"
+  name: "Nashville"
+  state: "Tennessee"
 
 # Neighborhood labeling settings for maps
 neighborhoods:
@@ -31,10 +31,10 @@ neighborhoods:
 # 2. GTFS Feeds
 # -----------------------------------------------------------------------------
 gtfs:
-  # DART (Dallas Area Rapid Transit)
+  # WeGo Public Transit (Nashville MTA) — single consolidated feed
   url:
-    - "https://www.dart.org/transitdata/latest/google_transit.zip"
-  transitland_feed_id: "f-9vg-dallasarearapidtransit"
+    - "https://www.wegotransit.com/GoogleExport/Google_Transit.zip"
+  transitland_feed_id: "f-dn6-regionaltransportationauthorityofmiddletennessee~nashville"
   # Service date for analysis (typical weekday — UPDATE after downloading feed)
   # Check the feed's calendar.txt for valid dates
   analysis_date: "20260310"
@@ -44,7 +44,7 @@ gtfs:
 
 spatial:
   unit: "tract"
-  crs_projected: "EPSG:2276"     # Texas State Plane North Central
+  crs_projected: "EPSG:2274"     # Tennessee State Plane
   crs_geographic: "EPSG:4326"
   buffer_bus: 400
   buffer_rail: 800
@@ -209,7 +209,7 @@ built_environment:
     network_type: "walk"
  
   land_use_mix:
-    source: "osm"              # "sld" (EPA Smart Location Database) or "osm" (Shannon entropy)
+    source: "sld"              # "sld" (EPA Smart Location Database) or "osm" (Shannon entropy)
     min_features: 15           # OSM fallback: minimum tagged features for reliable entropy
     test_thresholds: [10, 15, 20]
     osm_tags:
@@ -406,3 +406,4 @@ outputs:
   csv: true
   map_dpi: 300
   map_figsize: [12, 10]
+
