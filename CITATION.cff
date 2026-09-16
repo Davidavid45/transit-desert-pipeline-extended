@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper below."
+title: "Transit Desert Identification Pipeline (Extended)"
+abstract: >-
+  An end-to-end Python pipeline that identifies transit deserts, Census tracts
+  where demand for public transit exceeds supply, using spatial statistics,
+  accessibility modeling, and ACS demographic data.
+type: software
+authors:
+  - given-names: Oluwasegun
+    family-names: Adegoke
+    affiliation: "Smart Cities and Civic Technologies Research Center, School of Information Studies, Syracuse University"
+    orcid: "https://orcid.org/0009-0007-5079-2252"
+repository-code: "https://github.com/Davidavid45/transit-desert-pipeline-extended"
+license: MIT
+keywords:
+  - transit equity
+  - transit deserts
+  - public transportation
+  - GTFS
+  - accessibility
+  - Title VI
+preferred-citation:
+  type: conference-paper
+  title: "A Reproducible Geospatial Framework for Equity-Focused Transit Service Gap Analysis"
+  authors:
+    - given-names: Oluwasegun
+      family-names: Adegoke
+      affiliation: "Syracuse University"
+      orcid: "https://orcid.org/0009-0007-5079-2252"
+    - given-names: Sevgi
+      family-names: Erdogan
+      affiliation: "Syracuse University"
+    - given-names: "Adewumi Augustine"
+      family-names: Adepitan
+  collection-title: "IEEE International Conference on Intelligent Transportation Systems (ITSC), Naples"
+  year: 2026
+  url: "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7315618"
