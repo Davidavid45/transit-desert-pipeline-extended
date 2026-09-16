@@ -2,6 +2,8 @@
 
 An end-to-end Python pipeline that identifies **transit deserts** — Census tracts where demand for public transit significantly exceeds supply — using spatial statistics, accessibility modeling, and ACS demographic data.
 
+Developed at the [Smart Cities and Civic Technologies (SC&CT) Research Center](https://ischool.syracuse.edu/research/smart-grid-research-center/), School of Information Studies, Syracuse University.
+
 ---
 
 ## Overview
@@ -209,3 +211,31 @@ Download H+T Index CSV files from [htaindex.cnt.org/download](https://htaindex.c
 - Java 11+ (for steps 2b/2c only)
 - Census API key (`CENSUS_API_KEY` environment variable)
 - osmium-tool (optional, for clipping state OSM PBFs to county extent — falls back to full-state PBF if unavailable)
+
+---
+
+## Citation
+
+If you use this pipeline, please cite the accompanying paper:
+
+> Adegoke, O., Erdogan, S., and Adepitan, A. A. (2026). A Reproducible Geospatial
+> Framework for Equity-Focused Transit Service Gap Analysis. IEEE International
+> Conference on Intelligent Transportation Systems (ITSC), Naples.
+> Preprint: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7315618
+
+A `CITATION.cff` file is included, so GitHub's "Cite this repository" button
+will generate BibTeX and APA automatically.
+
+---
+
+## Affiliation
+
+This work was carried out at the
+[Smart Cities and Civic Technologies (SC&CT) Research Center](https://ischool.syracuse.edu/research/smart-grid-research-center/),
+School of Information Studies, Syracuse University.
+
+---
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE).
