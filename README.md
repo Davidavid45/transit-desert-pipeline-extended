@@ -279,14 +279,25 @@ Download the H+T Index CSVs from [htaindex.cnt.org/download](https://htaindex.cn
 
 ## Citation
 
-If you use this pipeline, please cite:
+This pipeline implements methods from two papers. Please cite the one matching what you use.
+
+**For the CPTA and TVI framework and the service-gap method:**
 
 > Adegoke, O., Erdogan, S., and Adepitan, A. A. (2026). A Reproducible Geospatial
 > Framework for Equity-Focused Transit Service Gap Analysis. IEEE International
 > Conference on Intelligent Transportation Systems (ITSC), Naples.
 > Preprint: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=7315618
 
-A `CITATION.cff` file is included, so GitHub's "Cite this repository" button generates BibTeX and APA automatically.
+**For the two-pathway diagnostic, the minimum-service screen and the deficit profiles:**
+
+> Adegoke, O., and Erdogan, S. (2026). Beyond the Desert Label: A Pathway Diagnostic
+> for User-Centered Smart Mobility Service Design. IEEE International Smart Cities
+> Conference (ISC2), Porto.
+> Preprint: https://arxiv.org/abs/2609.21956
+
+If you use the five-criterion screen or the `desert_pathway` and `barrier_summary` outputs, the second paper is the one to cite.
+
+A `CITATION.cff` file is included for citing the software itself, so GitHub's "Cite this repository" button generates BibTeX and APA automatically.
 
 ---
 
