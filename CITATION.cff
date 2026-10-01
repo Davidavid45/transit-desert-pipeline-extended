@@ -1,11 +1,15 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite the accompanying paper below."
+message: "If you use this software, please cite it using the DOI below. The methods papers are listed in the README."
 title: "Transit Desert Identification Pipeline (Extended)"
 abstract: >-
   An end-to-end Python pipeline that identifies transit deserts, Census tracts
   where demand for public transit exceeds supply, using spatial statistics,
   accessibility modeling, and ACS demographic data.
 type: software
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20277451
+    description: "Concept DOI, always resolves to the latest archived version"
 authors:
   - given-names: Oluwasegun
     family-names: Adegoke

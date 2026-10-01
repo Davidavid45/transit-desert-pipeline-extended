@@ -1,0 +1,37 @@
+{
+  "title": "Transit Desert Identification Pipeline (Extended)",
+  "upload_type": "software",
+  "description": "Open-source Python pipeline that identifies transit deserts using a composite transit accessibility index, a transit vulnerability index, LISA spatial clustering, an absolute minimum-service screen applied uniformly across cities, and per-tract deficit profiling. Reproducible configuration files are included for Baltimore, Philadelphia, Nashville and Dallas.",
+  "creators": [
+    {
+      "name": "Adegoke, Oluwasegun",
+      "affiliation": "Smart Cities and Civic Technologies Research Center, School of Information Studies, Syracuse University",
+      "orcid": "0009-0007-5079-2252"
+    }
+  ],
+  "keywords": [
+    "transit deserts",
+    "transit equity",
+    "public transit",
+    "accessibility",
+    "geospatial analysis",
+    "LISA",
+    "GTFS",
+    "OpenStreetMap",
+    "Title VI"
+  ],
+  "license": "MIT",
+  "access_right": "open",
+  "related_identifiers": [
+    {
+      "identifier": "10.2139/ssrn.7315618",
+      "relation": "isSupplementTo",
+      "resource_type": "publication-conferencepaper"
+    },
+    {
+      "identifier": "arXiv:2609.21956",
+      "relation": "isSupplementTo",
+      "resource_type": "publication-preprint"
+    }
+  ]
+}

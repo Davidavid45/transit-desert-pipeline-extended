@@ -55,3 +55,6 @@ Thumbs.db
 # Config backups
 *.yaml.bak
 *.yml.bak
+
+README-1.md
+outputs/**
